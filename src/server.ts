@@ -10,7 +10,9 @@ import { producerById } from "./controllers/producer";
 
 const PORT = parseInt(process.env.PORT) || 4000;
 const { DB_URI, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME } = process.env;
-const MONGODB_URL = DB_URI || `mongodb://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?authSource=admin`;
+const MONGODB_URL =
+  DB_URI ||
+  `mongodb://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?authSource=admin`;
 
 (async () => {
   await mongoose.connect(MONGODB_URL);
