@@ -4,7 +4,13 @@ import { buildSchema } from "graphql";
 import mongoose from "mongoose";
 import { addResolversToSchema } from "@graphql-tools/schema";
 
-import { productById, productByProducerId } from "./controllers/product";
+import {
+  addProducts,
+  productById,
+  productByProducerId,
+  removeProductsByIds,
+  updateProduct,
+} from "./controllers/product";
 import { processImport } from "./controllers/productImport";
 import { producerById } from "./controllers/producer";
 
@@ -25,6 +31,9 @@ const MONGODB_URL =
 
     type Mutation {
       startImport: Boolean
+      addProducts(products: [ProductAddInput!]!): [ProductListItem]!
+      removeProducts(ids: [String!]!): Boolean
+      updateProduct(product: ProductUpdateInput!): Product!
     }
   
     type Product {
@@ -48,6 +57,19 @@ const MONGODB_URL =
       country: String
       region: String
     }
+
+    input ProductAddInput {
+      vintage: Int!
+      name: String!
+      producerId: String!
+    }
+
+    input ProductUpdateInput {
+      _id: String!
+      vintage: Int
+      name: String
+      producerId: String
+    }
   `);
 
   const resolvers = {
@@ -60,11 +82,15 @@ const MONGODB_URL =
         processImport();
         return true;
       },
+      removeProducts: async (obj, args) => {
+        await removeProductsByIds(args);
+        return true;
+      },
+      addProducts: (obj, args) => addProducts(args),
+      updateProduct: (obj, args) => updateProduct(args.product),
     },
     Product: {
-      producer: (parent) => {
-        return producerById(parent.producerId);
-      },
+      producer: (parent) => producerById(parent.producerId),
     },
   };
 

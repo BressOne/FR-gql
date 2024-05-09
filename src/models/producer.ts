@@ -23,4 +23,7 @@ const findProducersByNames = async (producerNames: string[]) => {
   return data;
 };
 
-export { insertProducers, findProducersByNames, getProducerById };
+const findProducersByFilter = async (filter: FilterQuery<Producer>) => ProducerSchema.find<Producer>(filter);
+
+
+export { insertProducers, findProducersByNames, getProducerById, findProducersByFilter };
