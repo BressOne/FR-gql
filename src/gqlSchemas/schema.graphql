@@ -1,0 +1,46 @@
+type Query {
+  product(_id: String!): Product
+  products(producerId: String!): [ProductListItem]!
+}
+
+type Mutation {
+  startImport: Boolean
+  addProducts(products: [ProductAddInput!]!): [ProductListItem]!
+  removeProducts(ids: [String!]!): Boolean
+  updateProduct(product: ProductUpdateInput!): Product!
+}
+
+type Product {
+  _id: String!
+  vintage: String!
+  name: String!
+  producerId: String!
+  producer: Producer!
+}
+
+type ProductListItem {
+  _id: String!
+  vintage: String!
+  name: String!
+  producerId: String!
+}
+
+type Producer {
+  _id: String!
+  name: String!
+  country: String
+  region: String
+}
+
+input ProductAddInput {
+  vintage: Int!
+  name: String!
+  producerId: String!
+}
+
+input ProductUpdateInput {
+  _id: String!
+  vintage: Int
+  name: String
+  producerId: String
+}

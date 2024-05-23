@@ -1,9 +1,10 @@
 import axios from "axios";
 import { parse } from "csv-parse";
-import { findProducersByNames, insertProducers } from "../models/producer";
-import { insetrProducts } from "../models/product";
 import { ProducerBase, ProductBase } from "../types/db";
 import { validateCSVRow } from "../validators/csv";
+import { Context } from "../types/common";
+import { Transform, TransformCallback, Writable } from "stream";
+import { pipeline } from "node:stream/promises";
 
 const batchingSize = process.env.BATCHING_SIZE
   ? parseInt(process.env.BATCHING_SIZE)
@@ -16,23 +17,22 @@ const prepareData = (data: string[][]) => {
   const products: Record<string, ProductBase & { producerName: string }> = {};
   const producers: Record<string, ProducerBase> = {};
   data.forEach((entry) => {
-    const { vintage, productName, producerName, country, region } =
-      validateCSVRow(entry);
-    if (producerName === "") {
-      console.log({ vintage, productName, producerName, country, region });
-    }
-    const identifier = vintage + productName + producerName;
-    if (!products[identifier]) {
-      products[identifier] = {
-        vintage: vintage,
-        name: productName,
-        producerName: producerName,
-      };
-      producers[producerName] = {
-        name: producerName,
-        ...(country ? { country } : {}),
-        ...(region ? { region } : {}),
-      };
+    const row = validateCSVRow(entry);
+    if (row) {
+      const { vintage, productName, producerName, country, region } = row;
+      const identifier = vintage + productName + producerName;
+      if (!products[identifier]) {
+        products[identifier] = {
+          vintage: vintage,
+          name: productName,
+          producerName: producerName,
+        };
+        producers[producerName] = {
+          name: producerName,
+          ...(country ? { country } : {}),
+          ...(region ? { region } : {}),
+        };
+      }
     }
   });
   return {
@@ -41,14 +41,81 @@ const prepareData = (data: string[][]) => {
   };
 };
 
-const processCreateEntities = async (data: string[][]) => {
+class DbStreamWritable extends Writable {
+  private processorFunction: (data: string[][], ctx: Context) => Promise<void>;
+  private ctx: Context;
+
+  constructor({
+    processorFn,
+    ctx,
+    ...options
+  }: {
+    processorFn: (data: string[][], ctx: Context) => Promise<void>;
+    ctx: Context;
+  } & Record<string, any>) {
+    super(options);
+
+    this.processorFunction = processorFn;
+    this.ctx = ctx;
+  }
+
+  async _write(
+    chunk: any,
+    encoding: BufferEncoding,
+    callback: (error?: Error) => void,
+  ): Promise<void> {
+    try {
+      const chunkedEntries: string[][] = JSON.parse(chunk.toString());
+      await this.processorFunction(chunkedEntries, this.ctx);
+      callback(null);
+    } catch (error) {
+      console.error(error);
+      callback(null);
+    }
+  }
+}
+
+class Aggregator extends Transform {
+  private buffer = [];
+  private tableHeadRecieved = false;
+
+  constructor(options?: any) {
+    super({ ...options, objectMode: true });
+  }
+
+  _transform(
+    chunk: any,
+    encoding: BufferEncoding,
+    callback: TransformCallback,
+  ): void {
+    if (this.tableHeadRecieved) {
+      this.buffer.push(chunk);
+      if (this.buffer.length >= batchingSize) {
+        callback(null, JSON.stringify(this.buffer));
+        this.buffer = [];
+      } else {
+        callback(null);
+      }
+    } else {
+      this.tableHeadRecieved = true;
+      callback(null);
+    }
+  }
+
+  _flush(callback: TransformCallback): void {
+    callback(null, JSON.stringify(this.buffer));
+    this.buffer = [];
+  }
+}
+
+const processCreateEntities = async (data: string[][], ctx: Context) => {
   const { products, producers } = prepareData(data);
 
-  const presentProducers = await findProducersByNames(
+  const presentProducers = await ctx.models.producerModel.findProducersByNames(
     producers.map((el) => el.name),
   );
 
-  const newProducers = await insertProducers(
+  const newProducers = await ctx.models.producerModel.insertProducers(
     producers.filter(
       (candidate) =>
         !presentProducers.some((existing) => existing.name === candidate.name),
@@ -56,20 +123,17 @@ const processCreateEntities = async (data: string[][]) => {
   );
 
   const producersHeap = [...presentProducers, ...newProducers];
-  await insetrProducts(
-    products.map((candidate) => ({
+  await ctx.models.productModel.bulWriteProducts(
+    products.map(({ producerName, ...candidate }) => ({
       ...candidate,
       producerId: producersHeap
-        .find((el) => el.name === candidate.producerName)
+        .find((el) => el.name === producerName)
         ._id.toString(),
     })),
   );
 };
 
-export const processImport = async () => {
-  let tableHeadRecieved = false;
-  let buffer: string[][] = [];
-
+export const processImport = async (ctx: Context) => {
   const parser = parse({
     delimiter: csvDelimiter,
   });
@@ -80,51 +144,10 @@ export const processImport = async () => {
 
   const stream = response.data;
 
-  const dataHandler = async (data: string[]) => {
-    if (tableHeadRecieved) {
-      buffer.push(data);
-      if (buffer.length >= batchingSize && !stream.isPaused()) {
-        stream.pause();
-        parser.pause();
-        try {
-          const duplicate = [...buffer];
-          buffer = [];
-          await processCreateEntities(duplicate);
-        } catch (error) {
-          console.debug(
-            "Error during import, no transaction rollback will be done.",
-            error,
-          );
-        }
-        stream.resume();
-        parser.resume();
-      }
-    } else {
-      tableHeadRecieved = true;
-    }
-    return;
-  };
-
-  parser.on("data", dataHandler);
-
-  parser.on("error", (err) => {
-    console.debug(err.message);
-  });
-
-  parser.on("end", async () => {
-    if (buffer.length) {
-      try {
-        const duplicate = [...buffer];
-        buffer = [];
-        await processCreateEntities(duplicate);
-      } catch (error) {
-        console.debug(
-          "Error during import, no transaction rollback will be done.",
-          error,
-        );
-      }
-    }
-  });
-
-  stream.pipe(parser);
+  await pipeline([
+    stream,
+    parser,
+    new Aggregator(),
+    new DbStreamWritable({ processorFn: processCreateEntities, ctx }),
+  ]);
 };

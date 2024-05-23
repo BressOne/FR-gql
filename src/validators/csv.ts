@@ -35,8 +35,8 @@ export const validateCSVRow = (row: Array<string | undefined>) => {
     errorMessages.push(message);
   }
   if (errorMessages.length) {
-    console.debug(errorMessages, row);
-    throw new Error(errorMessages.join("/n"));
+    console.error(errorMessages, row);
+    return null;
   } else {
     return {
       vintage,

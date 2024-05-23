@@ -1,11 +1,14 @@
+import { Context } from "src/types/common";
 import { Producer } from "../types/db";
-import { getProducerById } from "../models/producer";
 
-export const producerById = async ({
-  _id,
-}: {
-  _id: string;
-}): Promise<Producer> => {
-  const producer = await getProducerById(_id);
+export const producerById = async (
+  {
+    _id,
+  }: {
+    _id: string;
+  },
+  ctx: Context,
+): Promise<Producer> => {
+  const producer = await ctx.models.producerModel.getProducerById(_id);
   return producer;
 };

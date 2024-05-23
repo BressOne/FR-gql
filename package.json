@@ -13,6 +13,8 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@graphql-tools/graphql-file-loader": "^8.0.1",
+    "@graphql-tools/load": "^8.0.2",
     "@graphql-tools/schema": "^10.0.3",
     "axios": "^1.6.8",
     "csv-parse": "^5.5.5",
